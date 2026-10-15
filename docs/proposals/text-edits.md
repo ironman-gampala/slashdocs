@@ -49,8 +49,10 @@ Commenters and viewers see no change.
    highlight on each edited range.
 
 When the selection starts or ends inside an element such as `<strong>` or
-`<a>`, the edit grows to cover the whole element, and the editor shows the
-grown range. The editor never splits an element.
+`<a>` that it only partly covers, the edit grows to cover the whole element,
+and the editor shows the grown range. The editor never splits an element. A
+selection that ends where an element's text ends, or starts where it begins,
+stays inside that element.
 
 The editor refuses a selection, with a message, when:
 
@@ -66,8 +68,9 @@ The editor refuses a selection, with a message, when:
 While there are unsaved edits, the document bar shows **N unsaved edits**,
 **Discard**, and **Save as version**.
 
-- **N unsaved edits** opens a list of edits, each as old text → new text, with
-  a button to remove it. Removing an edit reloads the document and applies the
+- **N unsaved edits** opens a list of edits, each as old text → new text, or
+  as "Formatted" and the text when only its formatting changed, with a button
+  to remove it. Removing an edit reloads the document and applies the
   edits that remain.
 - **Discard** removes every edit and reloads the document.
 - **Save as version** asks for a change summary, prefilled with one line per
@@ -95,7 +98,8 @@ document. It edits the stored HTML instead.
 
 1. **Load the stored HTML.** The first **Edit** fetches the latest version
    through `GET /v1/documents/{id}/versions/{version_id}/html` and keeps it for
-   the session.
+   the session. It decodes the bytes as strict UTF-8 and keeps a byte order
+   mark, so the saved file encodes the untouched text to the same bytes.
 2. **Find the selection in it.** The bridge reports the selection as the same
    text-quote anchor comments use: quote, prefix, suffix, and offsets. The app
    parses the stored HTML with `DOMParser`, which runs no scripts, and resolves
@@ -114,9 +118,10 @@ document. It edits the stored HTML instead.
    that the two lists match and refuses the edit if they do not. It maps
    character offsets inside a text node to source offsets with character
    references, such as `&amp;` and `&nbsp;`, taken into account.
-4. **Bound the range.** The edit must sit inside one block element: `p`,
-   `h1`–`h6`, `li`, `td`, `th`, `dt`, `dd`, `blockquote`, `figcaption`, or a
-   `div` with no block children. When an end of the range falls inside an
+4. **Bound the range.** Both ends of the range must have the same nearest block
+   ancestor, such as a `p`, `h1`–`h6`, `li`, `td`, `th`, `dt`, `dd`,
+   `blockquote`, `figcaption`, `pre`, or `div`, and the range must not hold a
+   block, list, or table of its own. When an end of the range falls inside an
    inline element that the range does not fully contain, the range grows to
    include that element.
 5. **Sanitize the replacement.** DOMPurify, already a frontend dependency,
@@ -142,11 +147,12 @@ The app and the bridge exchange three new messages:
 | Direction    | Message                                     | Purpose                                               |
 | ------------ | ------------------------------------------- | ----------------------------------------------------- |
 | app → bridge | `slashdocs:edit-enabled` `{ enabled }`      | Shows or hides **Edit** in the selected-text toolbar. |
-| bridge → app | `slashdocs:edit-request` `{ anchor, top }`  | Opens the editor for the selection.                   |
+| bridge → app | `slashdocs:edit-request` `{ anchor, rect }` | Opens the editor for the selection.                   |
 | app → bridge | `slashdocs:edit-preview` `{ anchor, html }` | Shows an applied edit in the rendered document.       |
 
-**Discard**, removing an edit, and **Save as version** reload the rendered
-document rather than undoing previews.
+**Discard** and removing an edit reload the rendered document rather than undo
+previews, and **Save as version** moves the reader to the new version. The
+reloaded frame receives the remaining previews in the order the edits were made.
 
 Document scripts share an origin with the bridge, so they can forge
 `edit-request`. The app takes only the anchor from the message and resolves it
